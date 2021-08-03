@@ -1,0 +1,12 @@
+DACberry400 driver setup
+
+Prerequisite
+------------------------------------------------------------
+Install latest Raspberry OS (Kernel version: 5.10) in SD card. 
+Current driver only supported to kernel version 5.10.17 only.
+
+Setup
+------------------------------------------------------------
+1. Download Script dacberry400.sh and place in /home/pi directory.
+2. run the script.
+    bash dacberry400.sh
