@@ -16,7 +16,7 @@ Unless otherwise noted, code reproduced herein
 was written for this script.
 
 - This is a modification of Pimoroni pHAT script -
-- All rights to Pimoroni Crew! -
+- OSA Electronics Team 2021 -
 
 DISCLAIMER
 
@@ -625,7 +625,7 @@ fi
 if [ $i2sreq == "yes" ]; then
     echo -e "Note: $productname uses the I2S interface"
     if [ $OS_NAME != "Volumio" ]; then
-        warning "The on-board audio chip will be disabled if you proceed!"
+        warning "The on-board audio chip will be disabled if you proceed! Current audio configuration will be overwritten!"
     fi
 fi
 
