@@ -462,7 +462,15 @@ enable_pi_i2s() {
     fi
 }
 
+set_pi_gpio() {
+    if grep -q "gpio=26=op,dh" $CONFIG; then
+        echo -e "Already GPIO active"
+    else
+        echo "gpio=26=op,dh" | sudo tee -a $CONFIG &> /dev/null
+        ASK_TO_REBOOT=true
+    fi
 
+}
 
 test_audio() {
     echo
@@ -1101,6 +1109,8 @@ if confirm "Do you wish to continue?"; then
 	enable_pi_i2s
 	add_dtoverlay i2c1
         add_dtoverlay dacberry400
+	set_pi_gpio
+
         if [ -e $CONFIG ] && grep -q -E "^dtparam=audio=on$" $CONFIG; then
             bcm2835off="no"
             echo -e "Disabling default sound driver"
