@@ -23,7 +23,7 @@ DISCLAIMER
 # script control variables
 
 productname="DACBerry 400 Series" # the name of the product to install
-scriptname="dbr400" # the name of this script
+scriptname="dacberry400" # the name of this script
 spacereq=1 # minimum size required on root partition in MB
 debugmode="no" # whether the script should use debug routines
 debuguser="none" # optional test git user to use in debug mode
