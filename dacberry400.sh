@@ -16,14 +16,14 @@ Unless otherwise noted, code reproduced herein
 was written for this script.
 
 - This is a modification of Pimoroni pHAT script -
-- All rights to Pimoroni Crew! -
+- OSA Electronics Team 2021 -
 
 DISCLAIMER
 
 # script control variables
 
 productname="DACBerry 400 Series" # the name of the product to install
-scriptname="dbr400" # the name of this script
+scriptname="dacberry400" # the name of this script
 spacereq=1 # minimum size required on root partition in MB
 debugmode="no" # whether the script should use debug routines
 debuguser="none" # optional test git user to use in debug mode
@@ -633,7 +633,7 @@ fi
 if [ $i2sreq == "yes" ]; then
     echo -e "Note: $productname uses the I2S interface"
     if [ $OS_NAME != "Volumio" ]; then
-        warning "The on-board audio chip will be disabled if you proceed!"
+        warning "The on-board audio chip will be disabled if you proceed! Current audio configuration will be overwritten!"
     fi
 fi
 
