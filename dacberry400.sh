@@ -1082,17 +1082,29 @@ if confirm "Do you wish to continue?"; then
         else
             git clone --depth=1 https://github.com/$gitusername/$gitreponame &> /dev/null
         fi
-	DACBERRY_DRIVER=$(ls $gitreponame/* | grep "dacberry400.ko")
+
+	KERNEL_VERSION=$(uname -r | cut -c1-7)
+	if [ $KERNEL_VERSION == "5.10.17" ]; then
+		DRIVER_PATH=$gitreponame/kernel_5_10_17
+	elif [ $KERNEL_VERSION == "5.10.52" ]; then
+                DRIVER_PATH=$gitreponame/kernel_5_10_52
+	else
+		echo "Driver not found..aborting..."
+		exit
+	fi
+
+	DACBERRY_DRIVER=$(ls $DRIVER_PATH/* | grep "dacberry400.ko")
 	echo $DACBERRY_DRIVER
 	if [ -n "$DACBERRY_DRIVER" ]; then
-		sudo cp $DACBERRY_DRIVER /lib/modules/5.10.17-v7l+/kernel/sound/soc/bcm/
+		sudo cp $DACBERRY_DRIVER /lib/modules/$KERNEL_VERSION-v7l+/kernel/sound/soc/bcm/
 		echo -e "dacberry driver found"
 	fi
-	TLV320AIC3X_DRIVER=$(ls $gitreponame/* | grep "snd-soc-tlv320aic3x.ko")
+	TLV320AIC3X_DRIVER=$(ls $DRIVER_PATH/* | grep "snd-soc-tlv320aic3x.ko")
 	if [ -n "$TLV320AIC3X_DRIVER" ]; then
-                sudo cp $TLV320AIC3X_DRIVER /lib/modules/5.10.17-v7l+/kernel/sound/soc/codecs/
+                sudo cp $TLV320AIC3X_DRIVER /lib/modules/$KERNEL_VERSION-v7l+/kernel/sound/soc/codecs/
                 echo -e "TLV driver found"
         fi
+
 	DACBERRY_OVERLAY=$(ls $gitreponame/* | grep "dacberry400.dts")
 	if [ -n "$DACBERRY_OVERLAY" ]; then
                 dtc -O dtb -o dacberry400.dtbo -b 0 -@ $DACBERRY_OVERLAY
