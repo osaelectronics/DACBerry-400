@@ -3,7 +3,7 @@ DACberry400 driver setup
 Prerequisite
 ------------------------------------------------------------
 Install latest Raspberry OS (Kernel version: 5.10) in SD card. 
-Current driver only supported to kernel version 5.10.17 only.
+Current driver only supported to kernel version 5.10.17 and 5.10.52 only.
 
 Setup
 ------------------------------------------------------------
