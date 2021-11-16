@@ -262,6 +262,8 @@ raspbian_check() {
             IS_SUPPORTED=true && IS_EXPERIMENTAL=false
         elif cat /etc/os-release | grep -q "wheezy"; then
             IS_SUPPORTED=true && IS_EXPERIMENTAL=false
+        elif cat /etc/os-release | grep -q "bullseye"; then
+            IS_SUPPORTED=true && IS_EXPERIMENTAL=false
         else
             IS_SUPPORTED=false && IS_EXPERIMENTAL=false
         fi
