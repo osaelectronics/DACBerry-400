@@ -1094,6 +1094,8 @@ if confirm "Do you wish to continue?"; then
                 DRIVER_PATH=$gitreponame/kernel_5_10_60
 	elif [ $KERNEL_VERSION == "5.10.63" ]; then
                 DRIVER_PATH=$gitreponame/kernel_5_10_63
+	elif [ $KERNEL_VERSION == "5.10.90" ]; then
+                DRIVER_PATH=$gitreponame/kernel_5_10_90
 	else
 		echo "Driver not found..aborting..."
 		exit
