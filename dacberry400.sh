@@ -1085,19 +1085,23 @@ if confirm "Do you wish to continue?"; then
             git clone --depth=1 https://github.com/$gitusername/$gitreponame &> /dev/null
         fi
 
-	KERNEL_VERSION=$(uname -r | cut -c1-7)
-	if [ $KERNEL_VERSION == "5.10.17" ]; then
+	KERNEL_VERSION=$(uname -r)
+	if [ $KERNEL_VERSION == "5.10.17-v7l+" ]; then
 		DRIVER_PATH=$gitreponame/kernel_5_10_17
-	elif [ $KERNEL_VERSION == "5.10.52" ]; then
+	elif [ $KERNEL_VERSION == "5.10.52-v7l+" ]; then
                 DRIVER_PATH=$gitreponame/kernel_5_10_52
-	elif [ $KERNEL_VERSION == "5.10.60" ]; then
+	elif [ $KERNEL_VERSION == "5.10.60-v7l+" ]; then
                 DRIVER_PATH=$gitreponame/kernel_5_10_60
-	elif [ $KERNEL_VERSION == "5.10.63" ]; then
+	elif [ $KERNEL_VERSION == "5.10.63-v7l+" ]; then
                 DRIVER_PATH=$gitreponame/kernel_5_10_63
-	elif [ $KERNEL_VERSION == "5.10.90" ]; then
+	elif [ $KERNEL_VERSION == "5.10.90-v7l+" ]; then
                 DRIVER_PATH=$gitreponame/kernel_5_10_90
-	elif [ $KERNEL_VERSION == "5.10.92" ]; then
+	elif [ $KERNEL_VERSION == "5.10.92-v7l+" ]; then
                 DRIVER_PATH=$gitreponame/kernel_5_10_92
+	elif [ $KERNEL_VERSION == "5.10.92-v8+" ]; then
+                DRIVER_PATH=$gitreponame/kernel_5_10_92_v8
+        elif [ $KERNEL_VERSION == "5.10.103-v8+" ]; then
+                DRIVER_PATH=$gitreponame/kernel_5_10_103_v8
 	else
 		echo "Driver not found..aborting..."
 		exit
@@ -1106,12 +1110,12 @@ if confirm "Do you wish to continue?"; then
 	DACBERRY_DRIVER=$(ls $DRIVER_PATH/* | grep "dacberry400.ko")
 	echo $DACBERRY_DRIVER
 	if [ -n "$DACBERRY_DRIVER" ]; then
-		sudo cp $DACBERRY_DRIVER /lib/modules/$KERNEL_VERSION-v7l+/kernel/sound/soc/bcm/
+		sudo cp $DACBERRY_DRIVER /lib/modules/$KERNEL_VERSION/kernel/sound/soc/bcm/
 		echo -e "dacberry driver found"
 	fi
 	TLV320AIC3X_DRIVER=$(ls $DRIVER_PATH/* | grep "snd-soc-tlv320aic3x.ko")
 	if [ -n "$TLV320AIC3X_DRIVER" ]; then
-                sudo cp $TLV320AIC3X_DRIVER /lib/modules/$KERNEL_VERSION-v7l+/kernel/sound/soc/codecs/
+                sudo cp $TLV320AIC3X_DRIVER /lib/modules/$KERNEL_VERSION/kernel/sound/soc/codecs/
                 echo -e "TLV driver found"
         fi
 
