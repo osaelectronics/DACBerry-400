@@ -204,6 +204,10 @@ arch_check() {
             IS_ARMv6=true
         fi
     fi
+    if uname -m | grep -q "aarch64"; then
+	IS_ARMHF=true
+    fi
+
 }
 
 os_check() {
