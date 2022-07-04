@@ -5,7 +5,7 @@
 ### 1. Prerequisite
 ------------------------------------------------------------
 Install latest Raspberry OS (Kernel version: 5.10) in SD card. 
-Current driver only supported to kernel version 5.10.17, 5.10.52, 5.10.60, 5.10.63, 5.10.90, 5.10.92 and 5.10.103 only.
+Current driver only supported to kernel version 5.10.17, 5.10.52, 5.10.60, 5.10.63, 5.10.90, 5.10.92, 5.10.103 and 5.15.32 only.
 
 ### 2. Setup
 ------------------------------------------------------------

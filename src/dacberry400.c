@@ -182,7 +182,7 @@ static const struct snd_soc_ops snd_rpi_dacberry400_ops = {
 
 SND_SOC_DAILINK_DEFS(rpi_dacberry400,
 	DAILINK_COMP_ARRAY(COMP_CPU("bcm2835-i2s.0")),
-	DAILINK_COMP_ARRAY(COMP_CODEC("tlv320aic3x-codec.1-0018", "tlv320aic3x-hifi")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("tlv320aic3x.1-0018", "tlv320aic3x-hifi")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("bcm2835-i2s.0")));
 
 
@@ -192,7 +192,7 @@ static struct snd_soc_dai_link snd_rpi_dacberry400_dai[] = {
 					SND_SOC_DAIFMT_CBS_CFS,
 	.init			= snd_rpi_dacberry400_init,
 	.ops			= &snd_rpi_dacberry400_ops,
-	.symmetric_rates	= 1,
+	.symmetric_rate		= 1,
 	SND_SOC_DAILINK_REG(rpi_dacberry400),
 },
 };
@@ -229,6 +229,7 @@ static int snd_rpi_dacberry400_probe(struct platform_device *pdev)
 			dai->cpus->of_node = i2s_node;
 			dai->platforms->name = NULL;
 			dai->platforms->of_node = i2s_node;
+			of_node_put(i2s_node);
 		}
 
 		if (of_property_read_string(pdev->dev.of_node, "card_name",

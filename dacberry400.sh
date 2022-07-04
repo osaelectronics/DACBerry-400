@@ -1125,6 +1125,14 @@ if confirm "Do you wish to continue?"; then
                 echo -e "TLV driver found"
         fi
 
+	if [ $KERNEL_VERSION == "5.15.32-v8+" ]; then
+		TLV320AIC3X_I2C_DRIVER=$(ls $DRIVER_PATH/* | grep "snd-soc-tlv320aic3x-i2c.ko")
+		if [ -n "$TLV320AIC3X_I2C_DRIVER" ]; then
+			sudo cp $TLV320AIC3X_I2C_DRIVER /lib/modules/$KERNEL_VERSION/kernel/sound/soc/codecs/
+			echo -e "TLV I2C driver found"
+		fi
+	fi
+
 	DACBERRY_OVERLAY=$(ls $gitreponame/* | grep "dacberry400.dts")
 	if [ -n "$DACBERRY_OVERLAY" ]; then
                 dtc -O dtb -o dacberry400.dtbo -b 0 -@ $DACBERRY_OVERLAY
