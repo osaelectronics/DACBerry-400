@@ -251,6 +251,37 @@ os_check() {
     fi
 }
 
+kernel-ver-check() {
+  CURR_KERNEL=$(uname -r | cut --delimiter="-" --fields=1)
+  CURR_KERNEL_VER=$(echo "${CURR_KERNEL}" | cut --delimiter="." --fields=1)
+  CURR_KERNEL_MAJOR_VER=$(echo "${CURR_KERNEL}" | cut --delimiter="." --fields=2)
+  CURR_KERNEL_MINOR_VER=$(echo "${CURR_KERNEL}" | cut --delimiter="." --fields=3)
+  ALLOWED_KERNEL="5.16.68"
+  ALLOWED_KERNEL_VER=$(echo ${ALLOWED_KERNEL} | cut --delimiter="." --fields=1)
+  ALLOWED_KERNEL_MAJOR_VER=$(echo ${ALLOWED_KERNEL} | cut --delimiter="." --fields=2)
+  ALLOWED_KERNEL_MINOR_VER=$(echo ${ALLOWED_KERNEL} | cut --delimiter="." --fields=3)
+  KERNEL_INBUILT_DRIVER=true
+
+  if [ "${CURR_KERNEL_VER}" -gt "${ALLOWED_KERNEL_VER}" ]; then
+    KERNEL_INBUILT_DRIVER=false
+    exit
+  fi
+
+  if [ "${CURR_KERNEL_VER}" == "${ALLOWED_KERNEL_VER}" ]; then
+    if [ "${CURR_KERNEL_MAJOR_VER}" -gt "${ALLOWED_KERNEL_MAJOR_VER}" ]; then
+      KERNEL_INBUILT_DRIVER=false
+    fi
+  fi
+
+  if [ "${CURR_KERNEL_VER}" == "${ALLOWED_KERNEL_VER}" ]; then
+    if [ "${CURR_KERNEL_MAJOR_VER}" == "${ALLOWED_KERNEL_MAJOR_VER}" ]; then
+      if [ "${CURR_KERNEL_MINOR_VER}" -gt "${ALLOWED_KERNEL_MINOR_VER}" ]; then
+        KERNEL_INBUILT_DRIVER=false
+      fi
+    fi
+  fi
+}
+
 raspbian_check() {
     IS_SUPPORTED=false
     IS_EXPERIMENTAL=false
@@ -432,6 +463,13 @@ add_dtoverlay() {
         ASK_TO_REBOOT=true
     fi
 }
+
+enable_dacberry400_driver() {
+    echo "snd-soc-dacberry400" | sudo tee -a $LOADMOD &> /dev/null
+    echo -e "\nEnabling DACBERRY400 Driver"
+    ASK_TO_REBOOT=true
+}
+
 
 remove_dtoverlay() {
     sudo sed -i "/^dtoverlay=$1$/ s|^|#|" $CONFIG
@@ -1089,55 +1127,61 @@ if confirm "Do you wish to continue?"; then
             git clone --depth=1 https://github.com/$gitusername/$gitreponame &> /dev/null
         fi
 
-	KERNEL_VERSION=$(uname -r)
-	if [ $KERNEL_VERSION == "5.10.17-v7l+" ]; then
-		DRIVER_PATH=$gitreponame/kernel_5_10_17
-	elif [ $KERNEL_VERSION == "5.10.52-v7l+" ]; then
-                DRIVER_PATH=$gitreponame/kernel_5_10_52
-	elif [ $KERNEL_VERSION == "5.10.60-v7l+" ]; then
-                DRIVER_PATH=$gitreponame/kernel_5_10_60
-	elif [ $KERNEL_VERSION == "5.10.63-v7l+" ]; then
-                DRIVER_PATH=$gitreponame/kernel_5_10_63
-	elif [ $KERNEL_VERSION == "5.10.90-v7l+" ]; then
-                DRIVER_PATH=$gitreponame/kernel_5_10_90
-	elif [ $KERNEL_VERSION == "5.10.92-v7l+" ]; then
-                DRIVER_PATH=$gitreponame/kernel_5_10_92
-	elif [ $KERNEL_VERSION == "5.10.92-v8+" ]; then
-                DRIVER_PATH=$gitreponame/kernel_5_10_92_v8
-        elif [ $KERNEL_VERSION == "5.10.103-v8+" ]; then
-	        DRIVER_PATH=$gitreponame/kernel_5_10_103_v8
-	elif [ $KERNEL_VERSION == "5.15.32-v8+" ]; then
-                DRIVER_PATH=$gitreponame/kernel_5_15_32_v8
+	kernel-ver-check
+
+	if $KERNEL_INBUILT_DRIVER; then
+		enable_dacberry400_driver
 	else
-		echo "Driver not found..aborting..."
-		exit
-	fi
-
-	DACBERRY_DRIVER=$(ls $DRIVER_PATH/* | grep "dacberry400.ko")
-	echo $DACBERRY_DRIVER
-	if [ -n "$DACBERRY_DRIVER" ]; then
-		sudo cp $DACBERRY_DRIVER /lib/modules/$KERNEL_VERSION/kernel/sound/soc/bcm/
-		echo -e "dacberry driver found"
-	fi
-	TLV320AIC3X_DRIVER=$(ls $DRIVER_PATH/* | grep "snd-soc-tlv320aic3x.ko")
-	if [ -n "$TLV320AIC3X_DRIVER" ]; then
-                sudo cp $TLV320AIC3X_DRIVER /lib/modules/$KERNEL_VERSION/kernel/sound/soc/codecs/
-                echo -e "TLV driver found"
-        fi
-
-	if [ $KERNEL_VERSION == "5.15.32-v8+" ]; then
-		TLV320AIC3X_I2C_DRIVER=$(ls $DRIVER_PATH/* | grep "snd-soc-tlv320aic3x-i2c.ko")
-		if [ -n "$TLV320AIC3X_I2C_DRIVER" ]; then
-			sudo cp $TLV320AIC3X_I2C_DRIVER /lib/modules/$KERNEL_VERSION/kernel/sound/soc/codecs/
-			echo -e "TLV I2C driver found"
+		KERNEL_VERSION=$(uname -r)
+		if [ $KERNEL_VERSION == "5.10.17-v7l+" ]; then
+			DRIVER_PATH=$gitreponame/kernel_5_10_17
+		elif [ $KERNEL_VERSION == "5.10.52-v7l+" ]; then
+                	DRIVER_PATH=$gitreponame/kernel_5_10_52
+		elif [ $KERNEL_VERSION == "5.10.60-v7l+" ]; then
+                	DRIVER_PATH=$gitreponame/kernel_5_10_60
+		elif [ $KERNEL_VERSION == "5.10.63-v7l+" ]; then
+                	DRIVER_PATH=$gitreponame/kernel_5_10_63
+		elif [ $KERNEL_VERSION == "5.10.90-v7l+" ]; then
+                	DRIVER_PATH=$gitreponame/kernel_5_10_90
+		elif [ $KERNEL_VERSION == "5.10.92-v7l+" ]; then
+                	DRIVER_PATH=$gitreponame/kernel_5_10_92
+		elif [ $KERNEL_VERSION == "5.10.92-v8+" ]; then
+                	DRIVER_PATH=$gitreponame/kernel_5_10_92_v8
+        	elif [ $KERNEL_VERSION == "5.10.103-v8+" ]; then
+	        	DRIVER_PATH=$gitreponame/kernel_5_10_103_v8
+		elif [ $KERNEL_VERSION == "5.15.32-v8+" ]; then
+                	DRIVER_PATH=$gitreponame/kernel_5_15_32_v8
+		else
+			echo "Driver not found..aborting..."
+			exit
 		fi
-	fi
 
-	DACBERRY_OVERLAY=$(ls $gitreponame/* | grep "dacberry400.dts")
-	if [ -n "$DACBERRY_OVERLAY" ]; then
-                dtc -O dtb -o dacberry400.dtbo -b 0 -@ $DACBERRY_OVERLAY
-                sudo cp dacberry400.dtbo $DTBODIR
-                echo -e "Overlay created"
+		DACBERRY_DRIVER=$(ls $DRIVER_PATH/* | grep "dacberry400.ko")
+		echo $DACBERRY_DRIVER
+		if [ -n "$DACBERRY_DRIVER" ]; then
+			sudo cp $DACBERRY_DRIVER /lib/modules/$KERNEL_VERSION/kernel/sound/soc/bcm/
+			echo -e "dacberry driver found"
+		fi
+		TLV320AIC3X_DRIVER=$(ls $DRIVER_PATH/* | grep "snd-soc-tlv320aic3x.ko")
+		if [ -n "$TLV320AIC3X_DRIVER" ]; then
+                	sudo cp $TLV320AIC3X_DRIVER /lib/modules/$KERNEL_VERSION/kernel/sound/soc/codecs/
+                	echo -e "TLV driver found"
+        	fi
+
+		if [ $KERNEL_VERSION == "5.15.32-v8+" ]; then
+			TLV320AIC3X_I2C_DRIVER=$(ls $DRIVER_PATH/* | grep "snd-soc-tlv320aic3x-i2c.ko")
+			if [ -n "$TLV320AIC3X_I2C_DRIVER" ]; then
+				sudo cp $TLV320AIC3X_I2C_DRIVER /lib/modules/$KERNEL_VERSION/kernel/sound/soc/codecs/
+				echo -e "TLV I2C driver found"
+			fi
+		fi
+
+		DACBERRY_OVERLAY=$(ls $gitreponame/* | grep "dacberry400.dts")
+		if [ -n "$DACBERRY_OVERLAY" ]; then
+                	dtc -O dtb -o dacberry400.dtbo -b 0 -@ $DACBERRY_OVERLAY
+                	sudo cp dacberry400.dtbo $DTBODIR
+                	echo -e "Overlay created"
+		fi
         fi
 	sudo depmod -a
 	ASK_TO_REBOOT=true

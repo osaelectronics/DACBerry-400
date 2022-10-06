@@ -7,9 +7,11 @@
 Install latest Raspberry OS (Kernel version: 5.10) in SD card. 
 Current driver only supported to kernel version 5.10.17, 5.10.52, 5.10.60, 5.10.63, 5.10.90, 5.10.92, 5.10.103 and 5.15.32 only.
 
+Note: dacberry400 driver available in raspberry pi OS from kernel version 5.10.61. You need to run only dacberry400 script to enable it.
+
 ### 2. Setup
 ------------------------------------------------------------
-1. Download Script dacberry400.sh and place in /home/pi directory.
+1. Download Script dacberry400.sh and place in /home/pi directory. 
 2. run the script.
     bash dacberry400.sh
 
