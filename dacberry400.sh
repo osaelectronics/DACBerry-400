@@ -260,23 +260,22 @@ kernel-ver-check() {
   ALLOWED_KERNEL_VER=$(echo ${ALLOWED_KERNEL} | cut --delimiter="." --fields=1)
   ALLOWED_KERNEL_MAJOR_VER=$(echo ${ALLOWED_KERNEL} | cut --delimiter="." --fields=2)
   ALLOWED_KERNEL_MINOR_VER=$(echo ${ALLOWED_KERNEL} | cut --delimiter="." --fields=3)
-  KERNEL_INBUILT_DRIVER=true
+  KERNEL_INBUILT_DRIVER=false
 
   if [ "${CURR_KERNEL_VER}" -gt "${ALLOWED_KERNEL_VER}" ]; then
-    KERNEL_INBUILT_DRIVER=false
-    exit
+    KERNEL_INBUILT_DRIVER=true
   fi
 
   if [ "${CURR_KERNEL_VER}" == "${ALLOWED_KERNEL_VER}" ]; then
     if [ "${CURR_KERNEL_MAJOR_VER}" -gt "${ALLOWED_KERNEL_MAJOR_VER}" ]; then
-      KERNEL_INBUILT_DRIVER=false
+      KERNEL_INBUILT_DRIVER=true
     fi
   fi
 
   if [ "${CURR_KERNEL_VER}" == "${ALLOWED_KERNEL_VER}" ]; then
     if [ "${CURR_KERNEL_MAJOR_VER}" == "${ALLOWED_KERNEL_MAJOR_VER}" ]; then
       if [ "${CURR_KERNEL_MINOR_VER}" -gt "${ALLOWED_KERNEL_MINOR_VER}" ]; then
-        KERNEL_INBUILT_DRIVER=false
+        KERNEL_INBUILT_DRIVER=true
       fi
     fi
   fi
@@ -298,6 +297,8 @@ raspbian_check() {
         elif cat /etc/os-release | grep -q "wheezy"; then
             IS_SUPPORTED=true && IS_EXPERIMENTAL=false
         elif cat /etc/os-release | grep -q "bullseye"; then
+            IS_SUPPORTED=true && IS_EXPERIMENTAL=false
+        elif cat /etc/os-release | grep -q "bookworm"; then
             IS_SUPPORTED=true && IS_EXPERIMENTAL=false
         else
             IS_SUPPORTED=false && IS_EXPERIMENTAL=false
