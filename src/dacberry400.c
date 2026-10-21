@@ -27,6 +27,27 @@
 #include <linux/slab.h>
 #include "tlv320aic3x.h"
 
+/*
+ * Step 1 (pops only):
+ *  - keep_bias: keep the codec in STANDBY while idle. aic3x lets DAPM take it
+ *    to BIAS_OFF ~5 s after every close, which soft-resets the codec with the
+ *    outputs biased (pop) and replays the whole register cache on the next
+ *    open (pop again).
+ *  - pop_delay/pop_ramp: HP driver power-on delay and common-mode ramp
+ *    (reg 42), left at 0 us / 0 ms by the codec driver.
+ */
+static bool keep_bias = true;
+module_param(keep_bias, bool, 0444);
+MODULE_PARM_DESC(keep_bias, "Keep the codec biased while idle (no reset on close). Default: Y");
+
+static int pop_delay = 6;
+module_param(pop_delay, int, 0444);
+MODULE_PARM_DESC(pop_delay, "HP driver power-on delay: 0=0us 1=10us 2=100us 3=1ms 4=10ms 5=50ms 6=100ms 7=200ms 8=400ms 9=800ms 10=2s 11=4s. Default: 6");
+
+static int pop_ramp = 3;
+module_param(pop_ramp, int, 0444);
+MODULE_PARM_DESC(pop_ramp, "HP driver ramp-up step: 0=0ms 1=1ms 2=2ms 3=4ms. Default: 3");
+
 static const struct snd_kcontrol_new dacberry400_controls[] = {
 	SOC_DAPM_PIN_SWITCH("MIC Jack"),
 	SOC_DAPM_PIN_SWITCH("Line In"),
@@ -66,6 +87,10 @@ static int snd_rpi_dacberry400_init(struct snd_soc_pcm_runtime *rtd)
 
 	if (ret && ret != -ENOTSUPP)
 		goto err;
+
+	snd_soc_component_update_bits(component, HPOUT_POP_REDUCTION, 0xfc,
+				      (clamp(pop_delay, 0, 11) << 4) |
+				      (clamp(pop_ramp, 0, 3) << 2));
 
 	snd_soc_component_write(component, HPRCOM_CFG, 0x20);
 	snd_soc_component_write(component, DACL1_2_HPLOUT_VOL, 0x80);
@@ -173,6 +198,19 @@ static struct snd_soc_dai_link snd_rpi_dacberry400_dai[] = {
 },
 };
 
+static int snd_rpi_dacberry400_late_probe(struct snd_soc_card *card)
+{
+	struct snd_soc_pcm_runtime *rtd =
+		snd_soc_get_pcm_runtime(card, &card->dai_link[0]);
+	struct snd_soc_component *component =
+		snd_soc_rtd_to_codec(rtd, 0)->component;
+
+	if (keep_bias)
+		snd_soc_component_get_dapm(component)->idle_bias_off = 0;
+
+	return 0;
+}
+
 static struct snd_soc_card snd_rpi_dacberry400 = {
 	.owner			= THIS_MODULE,
 	.dai_link		= snd_rpi_dacberry400_dai,
@@ -184,6 +222,7 @@ static struct snd_soc_card snd_rpi_dacberry400 = {
 	.dapm_routes		= dacberry400_audio_map,
 	.num_dapm_routes	= ARRAY_SIZE(dacberry400_audio_map),
 	.set_bias_level		= snd_rpi_dacberry400_set_bias_level,
+	.late_probe		= snd_rpi_dacberry400_late_probe,
 };
 
 static int snd_rpi_dacberry400_probe(struct platform_device *pdev)
