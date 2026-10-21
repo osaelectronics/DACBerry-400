@@ -26,6 +26,7 @@
 #include <linux/acpi.h>
 #include <linux/slab.h>
 #include "tlv320aic3x.h"
+#include <linux/delay.h>
 
 /*
  * Step 1 (pops only):
@@ -63,7 +64,30 @@ static const struct snd_kcontrol_new dacberry400_controls[] = {
 	SOC_DAPM_PIN_SWITCH("Headphone Jack"),
 };
 
+/*
+ * Step 4b: the codec PLL runs from BCLK and the Pi stops BCLK when the PCM
+ * is closed. The DAC needs a clock to finish its power-down (datasheet: keep
+ * the clock until the DAC power-down flag is set), otherwise it stays half
+ * powered (reg 94) and its noise reaches the always-on HP drivers. So:
+ * ignore_pmdown_time (DAC off at stream stop, BCLK still running), wait for
+ * the soft-mute ramp before DAPM powers anything down, poll reg 94, and only
+ * then gate the PLL.
+ */
+static unsigned int db400_rate = 48000;
+static bool db400_dac_unmuted;
+
+static int db400_pre_event(struct snd_soc_dapm_widget *w,
+			   struct snd_kcontrol *kcontrol, int event)
+{
+	if (event == SND_SOC_DAPM_PRE_PMD && db400_dac_unmuted) {
+		msleep(DIV_ROUND_UP(2 * 127 * 1000, db400_rate) + 1);
+		db400_dac_unmuted = false;
+	}
+	return 0;
+}
+
 static const struct snd_soc_dapm_widget dacberry400_widgets[] = {
+	SND_SOC_DAPM_PRE("DB400 DAC Mute Wait", db400_pre_event),
 	SND_SOC_DAPM_HP("Headphone Jack", NULL),
 	SND_SOC_DAPM_MIC("MIC Jack", NULL),
 	SND_SOC_DAPM_LINE("Line In", NULL),
@@ -191,6 +215,8 @@ static int snd_rpi_dacberry400_hw_params(struct snd_pcm_substream *substream,
 	if (ret)
 		return ret;
 
+	db400_rate = params_rate(params);
+
 	/*
 	 * Step 2 (clock): the codec PLL is fed from BCLK (clk_id 2), but init()
 	 * declared a fixed 12 MHz while the real BCLK is rate*channels*width
@@ -207,7 +233,46 @@ static int snd_rpi_dacberry400_hw_params(struct snd_pcm_substream *substream,
 	return ret;
 }
 
+static int snd_rpi_dacberry400_prepare(struct snd_pcm_substream *substream)
+{
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		db400_dac_unmuted = true;
+	return 0;
+}
+
+static void db400_wait_dac_off(struct snd_soc_component *component)
+{
+	struct i2c_client *client = i2c_verify_client(component->dev);
+	int i, v = 0;
+
+	if (!client)
+		return;
+	for (i = 0; i < 50; i++) {
+		v = i2c_smbus_read_byte_data(client, 94);	/* module power status */
+		if (v < 0 || !(v & 0xc0))			/* D7/D6: L/R DAC */
+			return;
+		usleep_range(1000, 1500);
+	}
+	dev_info(component->dev, "DAC power-down not completed (reg94=0x%02x)\n", v);
+}
+
+static int snd_rpi_dacberry400_hw_free(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *codec_dai = snd_soc_rtd_to_codec(rtd, 0);
+
+	/* last active stream: DAPM already powered the DAC down (with BCLK) */
+	if (snd_soc_dai_active(codec_dai) == 1) {
+		db400_wait_dac_off(codec_dai->component);
+		snd_soc_component_update_bits(codec_dai->component,
+					      AIC3X_PLL_PROGA_REG, PLL_ENABLE, 0);
+	}
+	return 0;
+}
+
 static const struct snd_soc_ops snd_rpi_dacberry400_ops = {
+	.prepare = snd_rpi_dacberry400_prepare,
+	.hw_free = snd_rpi_dacberry400_hw_free,
 	.hw_params = snd_rpi_dacberry400_hw_params,
 };
 
@@ -224,6 +289,7 @@ static struct snd_soc_dai_link snd_rpi_dacberry400_dai[] = {
 	.init			= snd_rpi_dacberry400_init,
 	.ops			= &snd_rpi_dacberry400_ops,
 	.symmetric_rate		= 1,
+	.ignore_pmdown_time	= 1,
 	SND_SOC_DAILINK_REG(rpi_dacberry400),
 },
 };
