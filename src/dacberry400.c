@@ -157,8 +157,11 @@ static DECLARE_DELAYED_WORK(db400_ramp_work, db400_ramp_work_fn);
  * DAC, so it cannot get stuck and the step 4c reset (a pop) is not needed.
  */
 static const char * const db400_dac_pins[] = { "Left DAC", "Right DAC" };
+/* step 8: same for the ADCs, WirePlumber probes the capture side too */
+static const char * const db400_adc_pins[] = { "Left ADC", "Right ADC" };
+static bool db400_dac_was_on;
 
-static void db400_dac_connect(bool on)
+static void db400_pins_connect(const char * const *pins, bool on)
 {
 	struct snd_soc_dapm_context *dapm;
 	int i;
@@ -166,22 +169,34 @@ static void db400_dac_connect(bool on)
 	if (!db400_comp)
 		return;
 	dapm = snd_soc_component_get_dapm(db400_comp);
-	for (i = 0; i < ARRAY_SIZE(db400_dac_pins); i++) {
+	for (i = 0; i < 2; i++) {
 		if (on)
-			snd_soc_dapm_enable_pin(dapm, db400_dac_pins[i]);
+			snd_soc_dapm_enable_pin(dapm, pins[i]);
 		else
-			snd_soc_dapm_disable_pin(dapm, db400_dac_pins[i]);
+			snd_soc_dapm_disable_pin(dapm, pins[i]);
 	}
 	if (on)
 		snd_soc_dapm_sync(dapm);
 }
 
+static void db400_dac_connect(bool on)
+{
+	db400_pins_connect(db400_dac_pins, on);
+}
+
 static void db400_dac_on_work_fn(struct work_struct *work)
 {
+	db400_dac_was_on = true;
 	db400_dac_connect(true);	/* DAPM powers the DAC now, BCLK runs */
 	schedule_delayed_work(&db400_ramp_work, msecs_to_jiffies(30));
 }
 static DECLARE_WORK(db400_dac_on_work, db400_dac_on_work_fn);
+
+static void db400_adc_on_work_fn(struct work_struct *work)
+{
+	db400_pins_connect(db400_adc_pins, true);
+}
+static DECLARE_WORK(db400_adc_on_work, db400_adc_on_work_fn);
 
 static int db400_pre_event(struct snd_soc_dapm_widget *w,
 			   struct snd_kcontrol *kcontrol, int event)
@@ -263,52 +278,6 @@ err:
 	return ret;
 }
 
-static int snd_rpi_dacberry400_set_bias_level(struct snd_soc_card *card,
-	struct snd_soc_dapm_context *dapm, enum snd_soc_bias_level level)
-{
-	struct snd_soc_pcm_runtime *rtd;
-	struct snd_soc_dai *codec_dai;
-	struct snd_soc_component *component;
-	struct dacberry_priv *aic3x;
-
-	rtd = snd_soc_get_pcm_runtime(card, &card->dai_link[0]);
-	codec_dai = snd_soc_rtd_to_codec(rtd, 0);
-	component = codec_dai->component;
-	aic3x = snd_soc_component_get_drvdata(component);
-	if (dapm->dev != codec_dai->dev)
-		return 0;
-
-	switch (level) {
-	case SND_SOC_BIAS_PREPARE:
-		if (dapm->bias_level != SND_SOC_BIAS_STANDBY)
-			break;
-		/* UNMUTE ADC/DAC */
-		snd_soc_component_write(component, LINE1R_2_RADC_CTRL, 0x04);
-		snd_soc_component_write(component, LINE1L_2_LADC_CTRL, 0x04);
-		snd_soc_component_write(component, LADC_VOL, 0x00);
-		snd_soc_component_write(component, RADC_VOL, 0x00);
-		pr_info("%s: unmute ADC/DAC\n", __func__);
-		break;
-
-	case SND_SOC_BIAS_STANDBY:
-		if (dapm->bias_level != SND_SOC_BIAS_PREPARE)
-			break;
-		/* MUTE ADC/DAC */
-		snd_soc_component_write(component, LDAC_VOL, 0x80);
-		snd_soc_component_write(component, RDAC_VOL, 0x80);
-		snd_soc_component_write(component, LADC_VOL, 0x80);
-		snd_soc_component_write(component, RADC_VOL, 0x80);
-		snd_soc_component_write(component, LINE1R_2_RADC_CTRL, 0x00);
-		snd_soc_component_write(component, LINE1L_2_LADC_CTRL, 0x00);
-		pr_info("%s: mute ADC/DAC\n", __func__);
-		break;
-	default:
-		break;
-	}
-
-	return 0;
-}
-
 static int snd_rpi_dacberry400_hw_params(struct snd_pcm_substream *substream,
 					   struct snd_pcm_hw_params *params)
 {
@@ -357,13 +326,14 @@ static int snd_rpi_dacberry400_hw_params(struct snd_pcm_substream *substream,
 static int snd_rpi_dacberry400_trigger(struct snd_pcm_substream *substream,
 				       int cmd)
 {
-	if (substream->stream != SNDRV_PCM_STREAM_PLAYBACK)
-		return 0;
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		schedule_work(&db400_dac_on_work);
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			schedule_work(&db400_dac_on_work);
+		else
+			schedule_work(&db400_adc_on_work);
 		break;
 	}
 	return 0;
@@ -424,14 +394,22 @@ static int snd_rpi_dacberry400_hw_free(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_soc_dai *codec_dai = snd_soc_rtd_to_codec(rtd, 0);
+	bool check_dac = false;
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		cancel_work_sync(&db400_dac_on_work);
 		db400_dac_connect(false);
+		check_dac = db400_dac_was_on;	/* only if we powered the DAC */
+		db400_dac_was_on = false;
+	} else {
+		cancel_work_sync(&db400_adc_on_work);
+		db400_pins_connect(db400_adc_pins, false);
 	}
 
-	/* last active stream: DAPM already powered the DAC down (with BCLK) */
-	if (snd_soc_dai_active(codec_dai) == 1) {
+	/* DAPM already powered the DAC down (with BCLK) at stream stop */
+	/* reg 94 bit 6 also follows the capture path: only judge with no capture */
+	if (check_dac &&
+	    !snd_soc_dai_stream_active(codec_dai, SNDRV_PCM_STREAM_CAPTURE)) {
 		if (!db400_wait_dac_off(codec_dai->component)) {
 			if (recover)
 				db400_recover_codec(codec_dai->component);
@@ -439,6 +417,10 @@ static int snd_rpi_dacberry400_hw_free(struct snd_pcm_substream *substream)
 				dev_info(codec_dai->component->dev,
 					 "DAC power-down not completed (no recovery)\n");
 		}
+	}
+
+	/* last active stream: gate the PLL while BCLK still runs */
+	if (snd_soc_dai_active(codec_dai) == 1) {
 		if (gate_pll)
 			snd_soc_component_update_bits(codec_dai->component,
 						      AIC3X_PLL_PROGA_REG, PLL_ENABLE, 0);
@@ -488,6 +470,7 @@ static int snd_rpi_dacberry400_late_probe(struct snd_soc_card *card)
 		dapm->idle_bias_off = 0;
 
 	db400_dac_connect(false);	/* step 7: no DAC until a stream starts */
+	db400_pins_connect(db400_adc_pins, false);	/* step 8: same for ADCs */
 
 	if (always_on)
 		for (i = 0; i < ARRAY_SIZE(hp_widgets); i++)
@@ -506,7 +489,6 @@ static struct snd_soc_card snd_rpi_dacberry400 = {
 	.num_dapm_widgets	= ARRAY_SIZE(dacberry400_widgets),
 	.dapm_routes		= dacberry400_audio_map,
 	.num_dapm_routes	= ARRAY_SIZE(dacberry400_audio_map),
-	.set_bias_level		= snd_rpi_dacberry400_set_bias_level,
 	.late_probe		= snd_rpi_dacberry400_late_probe,
 };
 
@@ -555,6 +537,7 @@ static int snd_rpi_dacberry400_probe(struct platform_device *pdev)
 static void snd_rpi_dacberry400_remove(struct platform_device *pdev)
 {
 	cancel_work_sync(&db400_dac_on_work);
+	cancel_work_sync(&db400_adc_on_work);
 	cancel_delayed_work_sync(&db400_ramp_work);
 	snd_soc_unregister_card(&snd_rpi_dacberry400);
 }
