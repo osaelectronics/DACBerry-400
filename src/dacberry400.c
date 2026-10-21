@@ -92,6 +92,15 @@ static int snd_rpi_dacberry400_init(struct snd_soc_pcm_runtime *rtd)
 				      (clamp(pop_delay, 0, 11) << 4) |
 				      (clamp(pop_ramp, 0, 3) << 2));
 
+	/*
+	 * Step 3b (HPxCOM, capless headphone output): HPLCOM (pin 20) and
+	 * HPRCOM (pin 22) are tied together and drive the jack sleeve. TI's
+	 * capless configuration: HPLCOM = constant VCM (virtual ground for the
+	 * sleeve), HPRCOM = external feedback (senses the sleeve). The old code
+	 * switched HPLCOM to "single-ended" (left channel on the sleeve ->
+	 * crosstalk) on every stream and back to differential in STANDBY.
+	 */
+	snd_soc_component_update_bits(component, HPLCOM_CFG, 0x30, 0x10);
 	snd_soc_component_write(component, HPRCOM_CFG, 0x20);
 	snd_soc_component_write(component, DACL1_2_HPLOUT_VOL, 0x80);
 	snd_soc_component_write(component, DACR1_2_HPROUT_VOL, 0x80);
@@ -106,7 +115,6 @@ static int snd_rpi_dacberry400_set_bias_level(struct snd_soc_card *card,
 	struct snd_soc_dai *codec_dai;
 	struct snd_soc_component *component;
 	struct dacberry_priv *aic3x;
-	u8 hpcom_reg = 0;
 
 	rtd = snd_soc_get_pcm_runtime(card, &card->dai_link[0]);
 	codec_dai = snd_soc_rtd_to_codec(rtd, 0);
@@ -120,8 +128,6 @@ static int snd_rpi_dacberry400_set_bias_level(struct snd_soc_card *card,
 		if (dapm->bias_level != SND_SOC_BIAS_STANDBY)
 			break;
 		/* UNMUTE ADC/DAC */
-		hpcom_reg = snd_soc_component_read(component, HPLCOM_CFG);
-		snd_soc_component_write(component, HPLCOM_CFG, hpcom_reg | 0x20);
 		snd_soc_component_write(component, LINE1R_2_RADC_CTRL, 0x04);
 		snd_soc_component_write(component, LINE1L_2_LADC_CTRL, 0x04);
 		snd_soc_component_write(component, LADC_VOL, 0x00);
@@ -139,7 +145,6 @@ static int snd_rpi_dacberry400_set_bias_level(struct snd_soc_card *card,
 		snd_soc_component_write(component, RADC_VOL, 0x80);
 		snd_soc_component_write(component, LINE1R_2_RADC_CTRL, 0x00);
 		snd_soc_component_write(component, LINE1L_2_LADC_CTRL, 0x00);
-		snd_soc_component_write(component, HPLCOM_CFG, 0x00);
 		pr_info("%s: mute ADC/DAC\n", __func__);
 		break;
 	default:
