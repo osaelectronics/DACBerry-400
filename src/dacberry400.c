@@ -149,6 +149,40 @@ static void db400_ramp_work_fn(struct work_struct *work)
 }
 static DECLARE_DELAYED_WORK(db400_ramp_work, db400_ramp_work_fn);
 
+/*
+ * Step 7: the DAC widgets are kept disconnected in DAPM and only connected
+ * once a playback stream has really started (TRIGGER_START), i.e. with BCLK
+ * running. A PCM that is opened/prepared and closed without being started
+ * (WirePlumber probing at boot / session start) therefore never powers the
+ * DAC, so it cannot get stuck and the step 4c reset (a pop) is not needed.
+ */
+static const char * const db400_dac_pins[] = { "Left DAC", "Right DAC" };
+
+static void db400_dac_connect(bool on)
+{
+	struct snd_soc_dapm_context *dapm;
+	int i;
+
+	if (!db400_comp)
+		return;
+	dapm = snd_soc_component_get_dapm(db400_comp);
+	for (i = 0; i < ARRAY_SIZE(db400_dac_pins); i++) {
+		if (on)
+			snd_soc_dapm_enable_pin(dapm, db400_dac_pins[i]);
+		else
+			snd_soc_dapm_disable_pin(dapm, db400_dac_pins[i]);
+	}
+	if (on)
+		snd_soc_dapm_sync(dapm);
+}
+
+static void db400_dac_on_work_fn(struct work_struct *work)
+{
+	db400_dac_connect(true);	/* DAPM powers the DAC now, BCLK runs */
+	schedule_delayed_work(&db400_ramp_work, msecs_to_jiffies(30));
+}
+static DECLARE_WORK(db400_dac_on_work, db400_dac_on_work_fn);
+
 static int db400_pre_event(struct snd_soc_dapm_widget *w,
 			   struct snd_kcontrol *kcontrol, int event)
 {
@@ -329,7 +363,7 @@ static int snd_rpi_dacberry400_trigger(struct snd_pcm_substream *substream,
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		schedule_delayed_work(&db400_ramp_work, msecs_to_jiffies(30));
+		schedule_work(&db400_dac_on_work);
 		break;
 	}
 	return 0;
@@ -391,6 +425,11 @@ static int snd_rpi_dacberry400_hw_free(struct snd_pcm_substream *substream)
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_soc_dai *codec_dai = snd_soc_rtd_to_codec(rtd, 0);
 
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		cancel_work_sync(&db400_dac_on_work);
+		db400_dac_connect(false);
+	}
+
 	/* last active stream: DAPM already powered the DAC down (with BCLK) */
 	if (snd_soc_dai_active(codec_dai) == 1) {
 		if (!db400_wait_dac_off(codec_dai->component)) {
@@ -447,6 +486,8 @@ static int snd_rpi_dacberry400_late_probe(struct snd_soc_card *card)
 
 	if (keep_bias)
 		dapm->idle_bias_off = 0;
+
+	db400_dac_connect(false);	/* step 7: no DAC until a stream starts */
 
 	if (always_on)
 		for (i = 0; i < ARRAY_SIZE(hp_widgets); i++)
@@ -513,6 +554,7 @@ static int snd_rpi_dacberry400_probe(struct platform_device *pdev)
 
 static void snd_rpi_dacberry400_remove(struct platform_device *pdev)
 {
+	cancel_work_sync(&db400_dac_on_work);
 	cancel_delayed_work_sync(&db400_ramp_work);
 	snd_soc_unregister_card(&snd_rpi_dacberry400);
 }
