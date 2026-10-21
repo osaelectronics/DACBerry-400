@@ -64,6 +64,23 @@ static bool route_ramp = true;
 module_param(route_ramp, bool, 0644);
 MODULE_PARM_DESC(route_ramp, "Attenuate the DAC->HP path around DAC power changes (step 5). Default: Y");
 
+/*
+ * Step 9: order the power-up of the capless output at driver load. HPxCOM
+ * (constant VCM) is the virtual ground of the jack sleeve; if it and
+ * HPL/HPR do not reach VCM together the headphone sees a step (pop).
+ */
+static int hp_seq = 1;
+module_param(hp_seq, int, 0444);
+MODULE_PARM_DESC(hp_seq, "HP power-up order at load: 0=all together, 1=HPxCOM (sleeve) first, 2=HPL/HPR first. Default: 1");
+
+static int hp_seq_delay = 1000;
+module_param(hp_seq_delay, int, 0444);
+MODULE_PARM_DESC(hp_seq_delay, "Delay between the two power-up phases in ms. Default: 1000");
+
+static int pop_cm = -1;
+module_param(pop_cm, int, 0444);
+MODULE_PARM_DESC(pop_cm, "Reg 42 bit 1 (powered-down output voltage option): -1=leave, 0 or 1. Default: -1");
+
 static int pop_delay = -1;
 module_param(pop_delay, int, 0444);
 MODULE_PARM_DESC(pop_delay, "HP driver power-on delay: 0=0us 1=10us 2=100us 3=1ms 4=10ms 5=50ms 6=100ms 7=200ms 8=400ms 9=800ms 10=2s 11=4s. Default: 9 (800 ms, boot only) with always_on, else 6");
@@ -258,6 +275,9 @@ static int snd_rpi_dacberry400_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_component_update_bits(component, HPOUT_POP_REDUCTION, 0xfc,
 				      (clamp(pop_delay, 0, 11) << 4) |
 				      (clamp(pop_ramp, 0, 3) << 2));
+	if (pop_cm == 0 || pop_cm == 1)
+		snd_soc_component_update_bits(component, HPOUT_POP_REDUCTION,
+					      0x02, pop_cm << 1);
 
 	/*
 	 * Step 3b (HPxCOM, capless headphone output): HPLCOM (pin 20) and
@@ -453,6 +473,28 @@ static struct snd_soc_dai_link snd_rpi_dacberry400_dai[] = {
 },
 };
 
+static const char * const db400_hp_out[] = { "Left HP Out", "Right HP Out" };
+static const char * const db400_hp_com[] = { "Left HP Com", "Right HP Com" };
+
+static void db400_force_pair(const char * const *pins)
+{
+	struct snd_soc_dapm_context *dapm;
+	int i;
+
+	if (!db400_comp)
+		return;
+	dapm = snd_soc_component_get_dapm(db400_comp);
+	for (i = 0; i < 2; i++)
+		snd_soc_dapm_force_enable_pin(dapm, pins[i]);
+}
+
+static void db400_hp_phase2_fn(struct work_struct *work)
+{
+	db400_force_pair(hp_seq == 2 ? db400_hp_com : db400_hp_out);
+	snd_soc_dapm_sync(snd_soc_component_get_dapm(db400_comp));
+}
+static DECLARE_DELAYED_WORK(db400_hp_phase2, db400_hp_phase2_fn);
+
 static int snd_rpi_dacberry400_late_probe(struct snd_soc_card *card)
 {
 	struct snd_soc_pcm_runtime *rtd =
@@ -460,11 +502,7 @@ static int snd_rpi_dacberry400_late_probe(struct snd_soc_card *card)
 	struct snd_soc_component *component =
 		snd_soc_rtd_to_codec(rtd, 0)->component;
 
-	static const char * const hp_widgets[] = {
-		"Left HP Out", "Right HP Out", "Left HP Com", "Right HP Com",
-	};
 	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
-	int i;
 
 	if (keep_bias)
 		dapm->idle_bias_off = 0;
@@ -472,9 +510,17 @@ static int snd_rpi_dacberry400_late_probe(struct snd_soc_card *card)
 	db400_dac_connect(false);	/* step 7: no DAC until a stream starts */
 	db400_pins_connect(db400_adc_pins, false);	/* step 8: same for ADCs */
 
-	if (always_on)
-		for (i = 0; i < ARRAY_SIZE(hp_widgets); i++)
-			snd_soc_dapm_force_enable_pin(dapm, hp_widgets[i]);
+	if (always_on) {
+		if (hp_seq == 1 || hp_seq == 2) {
+			/* phase 1 now (card core syncs after late_probe), phase 2 later */
+			db400_force_pair(hp_seq == 1 ? db400_hp_com : db400_hp_out);
+			schedule_delayed_work(&db400_hp_phase2,
+					      msecs_to_jiffies(clamp(hp_seq_delay, 0, 10000)));
+		} else {
+			db400_force_pair(db400_hp_com);
+			db400_force_pair(db400_hp_out);
+		}
+	}
 
 	return 0;
 }
@@ -536,6 +582,7 @@ static int snd_rpi_dacberry400_probe(struct platform_device *pdev)
 
 static void snd_rpi_dacberry400_remove(struct platform_device *pdev)
 {
+	cancel_delayed_work_sync(&db400_hp_phase2);
 	cancel_work_sync(&db400_dac_on_work);
 	cancel_work_sync(&db400_adc_on_work);
 	cancel_delayed_work_sync(&db400_ramp_work);
