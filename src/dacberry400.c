@@ -92,16 +92,7 @@ static int snd_rpi_dacberry400_init(struct snd_soc_pcm_runtime *rtd)
 				      (clamp(pop_delay, 0, 11) << 4) |
 				      (clamp(pop_ramp, 0, 3) << 2));
 
-	/*
-	 * Step 3 (HPxCOM): on the DBR400C, HPLCOM (pin 20) and HPRCOM (pin 22)
-	 * are shorted together and otherwise unconnected (R5 not fitted). The
-	 * old code put HPRCOM in "external feedback" and switched HPLCOM to
-	 * single-ended on every stream, i.e. drove the left channel into the
-	 * feedback input of the output stage: crosstalk and noise. Leave both
-	 * in their reset-default mode and never power their drivers.
-	 */
-	snd_soc_dapm_nc_pin(snd_soc_component_get_dapm(component), "HPLCOM");
-	snd_soc_dapm_nc_pin(snd_soc_component_get_dapm(component), "HPRCOM");
+	snd_soc_component_write(component, HPRCOM_CFG, 0x20);
 	snd_soc_component_write(component, DACL1_2_HPLOUT_VOL, 0x80);
 	snd_soc_component_write(component, DACR1_2_HPROUT_VOL, 0x80);
 err:
@@ -115,6 +106,7 @@ static int snd_rpi_dacberry400_set_bias_level(struct snd_soc_card *card,
 	struct snd_soc_dai *codec_dai;
 	struct snd_soc_component *component;
 	struct dacberry_priv *aic3x;
+	u8 hpcom_reg = 0;
 
 	rtd = snd_soc_get_pcm_runtime(card, &card->dai_link[0]);
 	codec_dai = snd_soc_rtd_to_codec(rtd, 0);
@@ -128,6 +120,8 @@ static int snd_rpi_dacberry400_set_bias_level(struct snd_soc_card *card,
 		if (dapm->bias_level != SND_SOC_BIAS_STANDBY)
 			break;
 		/* UNMUTE ADC/DAC */
+		hpcom_reg = snd_soc_component_read(component, HPLCOM_CFG);
+		snd_soc_component_write(component, HPLCOM_CFG, hpcom_reg | 0x20);
 		snd_soc_component_write(component, LINE1R_2_RADC_CTRL, 0x04);
 		snd_soc_component_write(component, LINE1L_2_LADC_CTRL, 0x04);
 		snd_soc_component_write(component, LADC_VOL, 0x00);
