@@ -27,6 +27,7 @@
 #include <linux/slab.h>
 #include "tlv320aic3x.h"
 #include <linux/delay.h>
+#include <linux/regmap.h>
 
 /*
  * Step 1 (pops only):
@@ -240,20 +241,48 @@ static int snd_rpi_dacberry400_prepare(struct snd_pcm_substream *substream)
 	return 0;
 }
 
-static void db400_wait_dac_off(struct snd_soc_component *component)
+static bool db400_wait_dac_off(struct snd_soc_component *component)
 {
 	struct i2c_client *client = i2c_verify_client(component->dev);
-	int i, v = 0;
+	int i, v;
 
 	if (!client)
-		return;
+		return true;
 	for (i = 0; i < 50; i++) {
 		v = i2c_smbus_read_byte_data(client, 94);	/* module power status */
 		if (v < 0 || !(v & 0xc0))			/* D7/D6: L/R DAC */
-			return;
+			return true;
 		usleep_range(1000, 1500);
 	}
-	dev_info(component->dev, "DAC power-down not completed (reg94=0x%02x)\n", v);
+	return false;
+}
+
+/*
+ * Step 4c: a PCM that was prepared but closed without ever being started
+ * (WirePlumber probing the card at boot) powered the DAC up while the Pi 5
+ * I2S block was not yet outputting BCLK (it only does from TRIGGER_START).
+ * Such a DAC can neither finish powering up nor down, and only a reset
+ * clears it: soft-reset the codec and replay the register cache, exactly
+ * what a driver reload did (which always left the outputs quiet).
+ */
+static void db400_recover_codec(struct snd_soc_component *component)
+{
+	struct regmap *map = component->regmap;
+	int ret;
+
+	if (!map)
+		return;
+
+	dev_dbg(component->dev, "DAC stuck without BCLK, resetting codec\n");
+
+	regcache_cache_bypass(map, true);
+	regmap_write(map, AIC3X_RESET, SOFT_RESET);
+	regcache_cache_bypass(map, false);
+
+	regcache_mark_dirty(map);
+	ret = regcache_sync(map);
+	if (ret)
+		dev_err(component->dev, "register restore failed: %d\n", ret);
 }
 
 static int snd_rpi_dacberry400_hw_free(struct snd_pcm_substream *substream)
@@ -263,7 +292,8 @@ static int snd_rpi_dacberry400_hw_free(struct snd_pcm_substream *substream)
 
 	/* last active stream: DAPM already powered the DAC down (with BCLK) */
 	if (snd_soc_dai_active(codec_dai) == 1) {
-		db400_wait_dac_off(codec_dai->component);
+		if (!db400_wait_dac_off(codec_dai->component))
+			db400_recover_codec(codec_dai->component);
 		snd_soc_component_update_bits(codec_dai->component,
 					      AIC3X_PLL_PROGA_REG, PLL_ENABLE, 0);
 	}
