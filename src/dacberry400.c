@@ -173,6 +173,21 @@ static int snd_rpi_dacberry400_hw_params(struct snd_pcm_substream *substream,
 	clock = snd_soc_component_read(component, 2);
 
 	ret = snd_soc_dai_set_bclk_ratio(cpu_dai, channels*width);
+	if (ret)
+		return ret;
+
+	/*
+	 * Step 2 (clock): the codec PLL is fed from BCLK (clk_id 2), but init()
+	 * declared a fixed 12 MHz while the real BCLK is rate*channels*width
+	 * (1.5..3.1 MHz), so aic3x programmed the PLL for the wrong input.
+	 * Tell the codec the real BCLK; its hw_params (called after this one)
+	 * then computes a correct P/J/D/R.
+	 */
+	ret = snd_soc_dai_set_sysclk(codec_dai, 2,
+				     params_rate(params) * channels * width,
+				     SND_SOC_CLOCK_IN);
+	if (ret == -ENOTSUPP)
+		ret = 0;
 
 	return ret;
 }
