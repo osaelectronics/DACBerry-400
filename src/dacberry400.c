@@ -40,9 +40,17 @@ static bool keep_bias = true;
 module_param(keep_bias, bool, 0444);
 MODULE_PARM_DESC(keep_bias, "Keep the codec biased while idle (no reset on close). Default: Y");
 
-static int pop_delay = 6;
+/*
+ * Step 4a: keep the HP drivers (and HPxCOM, the capless virtual ground) on
+ * while idle, so they are not ramped up/down around every stream.
+ */
+static bool always_on = true;
+module_param(always_on, bool, 0444);
+MODULE_PARM_DESC(always_on, "Keep HP output drivers powered while idle. Default: Y");
+
+static int pop_delay = -1;
 module_param(pop_delay, int, 0444);
-MODULE_PARM_DESC(pop_delay, "HP driver power-on delay: 0=0us 1=10us 2=100us 3=1ms 4=10ms 5=50ms 6=100ms 7=200ms 8=400ms 9=800ms 10=2s 11=4s. Default: 6");
+MODULE_PARM_DESC(pop_delay, "HP driver power-on delay: 0=0us 1=10us 2=100us 3=1ms 4=10ms 5=50ms 6=100ms 7=200ms 8=400ms 9=800ms 10=2s 11=4s. Default: 9 (800 ms, boot only) with always_on, else 6");
 
 static int pop_ramp = 3;
 module_param(pop_ramp, int, 0444);
@@ -88,6 +96,8 @@ static int snd_rpi_dacberry400_init(struct snd_soc_pcm_runtime *rtd)
 	if (ret && ret != -ENOTSUPP)
 		goto err;
 
+	if (pop_delay < 0)
+		pop_delay = always_on ? 9 : 6;
 	snd_soc_component_update_bits(component, HPOUT_POP_REDUCTION, 0xfc,
 				      (clamp(pop_delay, 0, 11) << 4) |
 				      (clamp(pop_ramp, 0, 3) << 2));
@@ -225,8 +235,18 @@ static int snd_rpi_dacberry400_late_probe(struct snd_soc_card *card)
 	struct snd_soc_component *component =
 		snd_soc_rtd_to_codec(rtd, 0)->component;
 
+	static const char * const hp_widgets[] = {
+		"Left HP Out", "Right HP Out", "Left HP Com", "Right HP Com",
+	};
+	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	int i;
+
 	if (keep_bias)
-		snd_soc_component_get_dapm(component)->idle_bias_off = 0;
+		dapm->idle_bias_off = 0;
+
+	if (always_on)
+		for (i = 0; i < ARRAY_SIZE(hp_widgets); i++)
+			snd_soc_dapm_force_enable_pin(dapm, hp_widgets[i]);
 
 	return 0;
 }
