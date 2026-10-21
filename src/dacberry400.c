@@ -51,6 +51,19 @@ static bool always_on = true;
 module_param(always_on, bool, 0444);
 MODULE_PARM_DESC(always_on, "Keep HP output drivers powered while idle. Default: Y");
 
+/* Step 6: diagnostic switches, each one undoes one of steps 4b/4c/5 */
+static bool gate_pll = true;
+module_param(gate_pll, bool, 0644);
+MODULE_PARM_DESC(gate_pll, "Gate the codec PLL when the last stream closes (step 4b). Default: Y");
+
+static bool recover = true;
+module_param(recover, bool, 0644);
+MODULE_PARM_DESC(recover, "Soft-reset the codec if a DAC is stuck after close (step 4c). Default: Y");
+
+static bool route_ramp = true;
+module_param(route_ramp, bool, 0644);
+MODULE_PARM_DESC(route_ramp, "Attenuate the DAC->HP path around DAC power changes (step 5). Default: Y");
+
 static int pop_delay = -1;
 module_param(pop_delay, int, 0444);
 MODULE_PARM_DESC(pop_delay, "HP driver power-on delay: 0=0us 1=10us 2=100us 3=1ms 4=10ms 5=50ms 6=100ms 7=200ms 8=400ms 9=800ms 10=2s 11=4s. Default: 9 (800 ms, boot only) with always_on, else 6");
@@ -100,7 +113,7 @@ static void db400_route_mute(void)
 {
 	unsigned int cur;
 
-	if (!db400_comp || db400_route_muted)
+	if (!route_ramp || !db400_comp || db400_route_muted)
 		return;
 	cur = snd_soc_component_read(db400_comp, DACL1_2_HPLOUT_VOL) & 0x7f;
 	if (cur < DB400_ROUTE_ATT_MAX)
@@ -361,7 +374,7 @@ static void db400_recover_codec(struct snd_soc_component *component)
 	if (!map)
 		return;
 
-	dev_dbg(component->dev, "DAC stuck without BCLK, resetting codec\n");
+	dev_info(component->dev, "DAC stuck without BCLK, resetting codec\n");
 
 	regcache_cache_bypass(map, true);
 	regmap_write(map, AIC3X_RESET, SOFT_RESET);
@@ -380,10 +393,16 @@ static int snd_rpi_dacberry400_hw_free(struct snd_pcm_substream *substream)
 
 	/* last active stream: DAPM already powered the DAC down (with BCLK) */
 	if (snd_soc_dai_active(codec_dai) == 1) {
-		if (!db400_wait_dac_off(codec_dai->component))
-			db400_recover_codec(codec_dai->component);
-		snd_soc_component_update_bits(codec_dai->component,
-					      AIC3X_PLL_PROGA_REG, PLL_ENABLE, 0);
+		if (!db400_wait_dac_off(codec_dai->component)) {
+			if (recover)
+				db400_recover_codec(codec_dai->component);
+			else
+				dev_info(codec_dai->component->dev,
+					 "DAC power-down not completed (no recovery)\n");
+		}
+		if (gate_pll)
+			snd_soc_component_update_bits(codec_dai->component,
+						      AIC3X_PLL_PROGA_REG, PLL_ENABLE, 0);
 	}
 	return 0;
 }
