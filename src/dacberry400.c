@@ -28,6 +28,7 @@
 #include "tlv320aic3x.h"
 #include <linux/delay.h>
 #include <linux/regmap.h>
+#include <linux/workqueue.h>
 
 /*
  * Step 1 (pops only):
@@ -77,15 +78,84 @@ static const struct snd_kcontrol_new dacberry400_controls[] = {
 static unsigned int db400_rate = 48000;
 static bool db400_dac_unmuted;
 
+/*
+ * Step 5: the DAC itself steps its output when it is powered up or down,
+ * and the HP drivers (always on) reproduce that step as a pop. Keep the
+ * DAC -> HP mixer path attenuated (-78 dB) whenever the DAC changes state
+ * or is off, and ramp it back to the user's level once the DAC is running.
+ * Registers 47/64: D7 route on, D6-D0 attenuation in ~0.5 dB steps.
+ */
+#define DB400_ROUTE_ATT_MAX	0x76
+static struct snd_soc_component *db400_comp;
+static unsigned int db400_route_att;	/* user's attenuation, 0 = 0 dB */
+static bool db400_route_muted;
+
+static void db400_route_set(unsigned int att)
+{
+	snd_soc_component_update_bits(db400_comp, DACL1_2_HPLOUT_VOL, 0x7f, att);
+	snd_soc_component_update_bits(db400_comp, DACR1_2_HPROUT_VOL, 0x7f, att);
+}
+
+static void db400_route_mute(void)
+{
+	unsigned int cur;
+
+	if (!db400_comp || db400_route_muted)
+		return;
+	cur = snd_soc_component_read(db400_comp, DACL1_2_HPLOUT_VOL) & 0x7f;
+	if (cur < DB400_ROUTE_ATT_MAX)
+		db400_route_att = cur;		/* remember the user's level */
+	db400_route_set(DB400_ROUTE_ATT_MAX);
+	db400_route_muted = true;
+}
+
+static void db400_route_ramp_up(void)
+{
+	int att;
+
+	if (!db400_comp || !db400_route_muted)
+		return;
+	for (att = DB400_ROUTE_ATT_MAX; att > (int)db400_route_att; att -= 4) {
+		db400_route_set(att);
+		usleep_range(1000, 1500);
+	}
+	db400_route_set(db400_route_att);
+	db400_route_muted = false;
+}
+
+/*
+ * On the Pi 5 the I2S block only starts BCLK at TRIGGER_START, so the DAC
+ * really powers up only then (DAPM switched it on in prepare). Ramp the
+ * route up from a delayed work scheduled at trigger time, once the DAC has
+ * had a clock for a while.
+ */
+static void db400_ramp_work_fn(struct work_struct *work)
+{
+	if (db400_dac_unmuted)
+		db400_route_ramp_up();
+}
+static DECLARE_DELAYED_WORK(db400_ramp_work, db400_ramp_work_fn);
+
 static int db400_pre_event(struct snd_soc_dapm_widget *w,
 			   struct snd_kcontrol *kcontrol, int event)
 {
-	if (event == SND_SOC_DAPM_PRE_PMD && db400_dac_unmuted) {
-		msleep(DIV_ROUND_UP(2 * 127 * 1000, db400_rate) + 1);
-		db400_dac_unmuted = false;
+	switch (event) {
+	case SND_SOC_DAPM_PRE_PMU:
+		if (db400_dac_unmuted)		/* a playback stream is starting */
+			db400_route_mute();
+		break;
+	case SND_SOC_DAPM_PRE_PMD:
+		cancel_delayed_work_sync(&db400_ramp_work);
+		if (db400_dac_unmuted) {
+			msleep(DIV_ROUND_UP(2 * 127 * 1000, db400_rate) + 1);
+			db400_dac_unmuted = false;
+			db400_route_mute();	/* before DAPM powers the DAC down */
+		}
+		break;
 	}
 	return 0;
 }
+
 
 static const struct snd_soc_dapm_widget dacberry400_widgets[] = {
 	SND_SOC_DAPM_PRE("DB400 DAC Mute Wait", db400_pre_event),
@@ -139,6 +209,9 @@ static int snd_rpi_dacberry400_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_component_write(component, HPRCOM_CFG, 0x20);
 	snd_soc_component_write(component, DACL1_2_HPLOUT_VOL, 0x80);
 	snd_soc_component_write(component, DACR1_2_HPROUT_VOL, 0x80);
+	db400_comp = component;
+	db400_route_att = 0;		/* 0 dB, as before */
+	db400_route_mute();		/* DAC is off until the first stream */
 err:
 	return ret;
 }
@@ -234,6 +307,21 @@ static int snd_rpi_dacberry400_hw_params(struct snd_pcm_substream *substream,
 	return ret;
 }
 
+static int snd_rpi_dacberry400_trigger(struct snd_pcm_substream *substream,
+				       int cmd)
+{
+	if (substream->stream != SNDRV_PCM_STREAM_PLAYBACK)
+		return 0;
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_RESUME:
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		schedule_delayed_work(&db400_ramp_work, msecs_to_jiffies(30));
+		break;
+	}
+	return 0;
+}
+
 static int snd_rpi_dacberry400_prepare(struct snd_pcm_substream *substream)
 {
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
@@ -302,6 +390,7 @@ static int snd_rpi_dacberry400_hw_free(struct snd_pcm_substream *substream)
 
 static const struct snd_soc_ops snd_rpi_dacberry400_ops = {
 	.prepare = snd_rpi_dacberry400_prepare,
+	.trigger = snd_rpi_dacberry400_trigger,
 	.hw_free = snd_rpi_dacberry400_hw_free,
 	.hw_params = snd_rpi_dacberry400_hw_params,
 };
@@ -405,6 +494,7 @@ static int snd_rpi_dacberry400_probe(struct platform_device *pdev)
 
 static void snd_rpi_dacberry400_remove(struct platform_device *pdev)
 {
+	cancel_delayed_work_sync(&db400_ramp_work);
 	snd_soc_unregister_card(&snd_rpi_dacberry400);
 }
 
