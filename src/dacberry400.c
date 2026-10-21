@@ -69,17 +69,17 @@ MODULE_PARM_DESC(route_ramp, "Attenuate the DAC->HP path around DAC power change
  * (constant VCM) is the virtual ground of the jack sleeve; if it and
  * HPL/HPR do not reach VCM together the headphone sees a step (pop).
  */
-static int hp_seq = 1;
+static int hp_seq;
 module_param(hp_seq, int, 0444);
-MODULE_PARM_DESC(hp_seq, "HP power-up order at load: 0=all together, 1=HPxCOM (sleeve) first, 2=HPL/HPR first. Default: 1");
+MODULE_PARM_DESC(hp_seq, "HP power-up order at load: 0=all together, 1=HPxCOM (sleeve) first, 2=HPL/HPR first. Default: 0");
 
 static int hp_seq_delay = 1000;
 module_param(hp_seq_delay, int, 0444);
 MODULE_PARM_DESC(hp_seq_delay, "Delay between the two power-up phases in ms. Default: 1000");
 
-static int pop_cm = -1;
+static int pop_cm = 1;
 module_param(pop_cm, int, 0444);
-MODULE_PARM_DESC(pop_cm, "Reg 42 bit 1 (powered-down output voltage option): -1=leave, 0 or 1. Default: -1");
+MODULE_PARM_DESC(pop_cm, "Reg 42 bit 1 (powered-down output voltage option): -1=leave, 0 or 1. Default: 1 (softer boot pop on the DBR400C)");
 
 static int pop_delay = -1;
 module_param(pop_delay, int, 0444);
@@ -580,6 +580,39 @@ static int snd_rpi_dacberry400_probe(struct platform_device *pdev)
 	return 0;
 }
 
+/*
+ * Step 10: orderly power-down on reboot/poweroff. Otherwise the HP drivers
+ * and the capless VCM collapse together with the rails (pop). Mute the
+ * drivers, then power them down while the codec is still supplied.
+ */
+static void db400_quiesce(void)
+{
+	struct snd_soc_dapm_context *dapm;
+	int i;
+
+	if (!db400_comp)
+		return;
+	cancel_delayed_work_sync(&db400_hp_phase2);
+	dapm = snd_soc_component_get_dapm(db400_comp);
+
+	db400_route_mute();
+	snd_soc_component_update_bits(db400_comp, HPLOUT_CTRL, 0x08, 0);	/* mute */
+	snd_soc_component_update_bits(db400_comp, HPROUT_CTRL, 0x08, 0);
+	msleep(20);
+
+	for (i = 0; i < 2; i++) {
+		snd_soc_dapm_disable_pin(dapm, db400_hp_out[i]);
+		snd_soc_dapm_disable_pin(dapm, db400_hp_com[i]);
+	}
+	snd_soc_dapm_sync(dapm);
+	msleep(300);
+}
+
+static void snd_rpi_dacberry400_shutdown(struct platform_device *pdev)
+{
+	db400_quiesce();
+}
+
 static void snd_rpi_dacberry400_remove(struct platform_device *pdev)
 {
 	cancel_delayed_work_sync(&db400_hp_phase2);
@@ -603,6 +636,7 @@ static struct platform_driver snd_rpi_dacberry400_driver = {
 	},
 	.probe = snd_rpi_dacberry400_probe,
 	.remove = snd_rpi_dacberry400_remove,
+	.shutdown = snd_rpi_dacberry400_shutdown,
 };
 
 module_platform_driver(snd_rpi_dacberry400_driver);
