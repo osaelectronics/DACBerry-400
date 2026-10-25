@@ -12,6 +12,8 @@
 # Config: ~/dacberry-test/dacberry-test.conf        (se crea en la primera ejecución)
 
 set -u
+# i2cget/i2cset están en /usr/sbin, que no está en el PATH de un usuario normal por SSH
+export PATH="$PATH:/usr/local/sbin:/usr/sbin:/sbin"
 
 DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 CONF="$DIR/dacberry-test.conf"
@@ -21,7 +23,7 @@ CARD=tlvaudioCODEC          # nombre de la tarjeta ALSA (overlay dacberry400)
 I2C_BUS=1
 I2C_ADDR=0x18
 VOLUME=75                   # % del control PCM durante la prueba
-SONG=""                     # canción de referencia (cualquier formato si hay ffmpeg)
+SONG=""                     # vacío = 1.flac en la carpeta del script (~/dacberry-test)
 SONG_START=0                # segundo de la canción donde empieza el fragmento
 SONG_SECONDS=20             # duración del fragmento
 LOG="$HOME/dacberry-test-log.csv"
@@ -158,11 +160,19 @@ set_mixer() {
 
 # ----------------------------------------------------------- preparación ---
 preflight() {
-	local c missing=""
-	for c in i2cget aplay speaker-test amixer fuser; do
-		command -v "$c" >/dev/null || missing="$missing $c"
+	local c missing="" pkgs=""
+	for c in i2cget:i2c-tools aplay:alsa-utils speaker-test:alsa-utils amixer:alsa-utils \
+		 fuser:psmisc ffmpeg:ffmpeg; do
+		command -v "${c%%:*}" >/dev/null && continue
+		missing="$missing ${c%%:*}"
+		case " $pkgs " in *" ${c#*:} "*) ;; *) pkgs="$pkgs ${c#*:}" ;; esac
 	done
-	[ -z "$missing" ] || die "Faltan herramientas:$missing  (sudo apt install i2c-tools alsa-utils psmisc)"
+	if [ -n "$missing" ]; then
+		warn "Faltan herramientas:$missing"
+		ask "¿Instalarlas ahora (apt install$pkgs)?" || die "No se puede continuar sin ellas."
+		# shellcheck disable=SC2086
+		sudo apt-get install -y $pkgs || die "Falló la instalación"
+	fi
 
 	[ -f "$MODPARAM/route_ramp" ] ||
 		die "No está cargado el driver dacberry400 v3.1.x (fix/incremental). Instálalo con install-dkms.sh y reinicia una vez."
@@ -177,14 +187,17 @@ preflight() {
 }
 
 prepare_song() {
-	while [ -z "$SONG" ] || [ ! -f "$SONG" ]; do
-		[ -n "$SONG" ] && warn "No existe: $SONG"
-		read -r -p "  Ruta de la canción de referencia (puedes arrastrar el archivo aquí): " SONG
-		SONG="${SONG%"${SONG##*[![:space:]]}"}"
-		SONG="${SONG#\'}"; SONG="${SONG%\'}"; SONG="${SONG#\"}"; SONG="${SONG%\"}"
-		SONG="${SONG/#\~/$HOME}"
-	done
-	save_conf
+	if [ -z "$SONG" ] || [ ! -f "$SONG" ]; then
+		[ -n "$SONG" ] && warn "No existe $SONG, uso $DIR/1.flac"
+		SONG="$DIR/1.flac"
+	fi
+	if [ ! -f "$SONG" ]; then
+		bad "No encuentro la canción de referencia: $SONG"
+		info "Copia tu canción como ${B}1.flac${N} en $DIR"
+		info "(desde Windows basta con dejar 1.flac junto a DACBerry-Test.bat)"
+		exit 1
+	fi
+	[ -f "$CONF" ] || save_conf
 
 	local stamp
 	stamp="$SONG|$(stat -c %Y "$SONG")|$SONG_START|$SONG_SECONDS"
@@ -390,8 +403,8 @@ printf '%s DACBerry 400 · estación de prueba %s\n\n' "$B" "$N"
 printf '  %sAntes de cambiar cada placa, corta su alimentación (interruptor del utillaje).%s\n' "$Y" "$N"
 printf '  %sConectar o quitar un HAT con 5V/3V3 presentes puede resetear la Pi o dañar la placa.%s\n\n' "$Y" "$N"
 
-preflight
 sudo -v || die "Hace falta sudo"
+preflight
 ( while true; do sudo -n true 2>/dev/null; sleep 50; done ) &
 KEEPALIVE=$!
 trap cleanup EXIT

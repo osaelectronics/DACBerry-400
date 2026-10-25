@@ -37,14 +37,16 @@ Crea `~/dacberry-test/dacberry-test.sh` y el icono **DACBerry 400 Test** en el e
 - **Escritorio:** doble clic en el icono. Se abre una terminal y te pide la contraseña de sudo una vez.
 - **SSH desde Windows:** `DACBerry-Test.bat` (edita la IP), o bien `ssh -t osa@IP ~/dacberry-test/dacberry-test.sh`.
 
-La primera vez te pide la ruta de la canción de referencia (puedes arrastrar el archivo a la terminal). Con `ffmpeg` se convierte una sola vez a WAV 48 kHz y se recorta.
+**Canción de referencia:** se llama siempre `1.flac` y va en `~/dacberry-test/`. Desde Windows basta con dejar `1.flac` junto a `DACBerry-Test.bat`: se copia a la Pi cada vez que lo lanzas. Se convierte una sola vez a WAV a 48 kHz (con `ffmpeg`) y se recorta al fragmento configurado.
+
+Si falta alguna herramienta (`i2c-tools`, `alsa-utils`, `psmisc`, `ffmpeg`), el script se ofrece a instalarla.
 
 La configuración está en `~/dacberry-test/dacberry-test.conf`:
 
 | Variable | Qué ajusta |
 |---|---|
 | `VOLUME` | % del control PCM durante la prueba |
-| `SONG` | Canción de referencia |
+| `SONG` | Otra ruta de canción (vacío = `1.flac` en `~/dacberry-test`) |
 | `SONG_START`, `SONG_SECONDS` | Inicio y duración del fragmento |
 | `LOG` | Archivo de resultados |
 
