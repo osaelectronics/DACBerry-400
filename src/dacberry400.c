@@ -292,7 +292,16 @@ static int snd_rpi_dacberry400_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_component_write(component, DACL1_2_HPLOUT_VOL, 0x80);
 	snd_soc_component_write(component, DACR1_2_HPROUT_VOL, 0x80);
 	db400_comp = component;
+	/*
+	 * Step 11: the card can be unbound and bound again (test station swaps
+	 * boards without a reboot). Start from a clean state every time: the
+	 * new codec has power-on defaults, not what the previous one had.
+	 */
 	db400_route_att = 0;		/* 0 dB, as before */
+	db400_route_muted = false;
+	db400_dac_unmuted = false;
+	db400_dac_was_on = false;
+	db400_rate = 48000;
 	db400_route_mute();		/* DAC is off until the first stream */
 err:
 	return ret;
@@ -615,11 +624,13 @@ static void snd_rpi_dacberry400_shutdown(struct platform_device *pdev)
 
 static void snd_rpi_dacberry400_remove(struct platform_device *pdev)
 {
+	db400_quiesce();		/* soft output power-down before unbind */
 	cancel_delayed_work_sync(&db400_hp_phase2);
 	cancel_work_sync(&db400_dac_on_work);
 	cancel_work_sync(&db400_adc_on_work);
 	cancel_delayed_work_sync(&db400_ramp_work);
 	snd_soc_unregister_card(&snd_rpi_dacberry400);
+	db400_comp = NULL;
 }
 
 static const struct of_device_id dacberry400_match_id[] = {
