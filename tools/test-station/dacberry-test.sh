@@ -22,7 +22,7 @@ CONF="$DIR/dacberry-test.conf"
 CARD=tlvaudioCODEC          # nombre de la tarjeta ALSA (overlay dacberry400)
 I2C_BUS=1
 I2C_ADDR=0x18
-VOLUME=75                   # % del control PCM durante la prueba
+VOLUME=90                   # % del control PCM durante la prueba
 SONG=""                     # vacío = 1.flac en la carpeta del script (~/dacberry-test)
 SONG_START=0                # segundo de la canción donde empieza el fragmento
 SONG_SECONDS=20             # duración del fragmento
